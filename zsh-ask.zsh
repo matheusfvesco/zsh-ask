@@ -33,7 +33,7 @@ typeset -g ZSH_ASK_HISTORY=""
 (( ! ${+ZSH_ASK_INITIALROLE} )) &&
 typeset -g ZSH_ASK_INITIALROLE="system"
 (( ! ${+ZSH_ASK_INITIALPROMPT} )) &&
-typeset -g ZSH_ASK_INITIALPROMPT="You are a helpful speacialist in code and linux commands. Be consise and direct in your answers. Try to give as many solutions as a single command, instead of developing a script, for example. If the user says something like 'find all jpeg files' for example, simply interpret it as a question on how to do it."
+typeset -g ZSH_ASK_INITIALPROMPT="You are a helpful specialist in code and linux commands. Be consise and direct in your answers. Try to give as many solutions as a single command, instead of developing a script, for example. If the user says something like 'find all jpeg files' for example, simply interpret it as a question on how to do it."
 
 function _zsh_ask_show_help() {
   echo "A lightweight Zsh plugin serves as a Ollama OpenAI API frontend, enabling you to interact with ollama models directly from Zsh."
