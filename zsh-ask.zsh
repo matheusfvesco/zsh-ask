@@ -1,11 +1,3 @@
-# A lightweight Zsh plugin serves as a ChatGPT API frontend, enabling you to interact with ChatGPT directly from the Zsh.
-# https://github.com/Licheam/zsh-ask
-# Copyright (c) 2023-2024 Leachim
-
-#--------------------------------------------------------------------#
-# Global Configuration Variables                                     #
-#--------------------------------------------------------------------#
-
 0=${(%):-%N}
 typeset -g ZSH_ASK_PREFIX=${0:A:h}
 
@@ -80,8 +72,10 @@ function ask() {
     local debug=false
     local raw=false
     local satisfied=true
+    local input=""
     local assistant="assistant"
-    while getopts ":hvcdmsiurM:f:t:" opt; do
+    
+    while getopts ":hvcdirM:t:" opt; do
         case $opt in
             h)
                 _zsh_ask_show_help
@@ -119,19 +113,6 @@ function ask() {
                     tokens=$OPTARG
                 fi
                 ;;
-            f)
-                usefile=true
-                if ! [ -f $OPTARG ]; then
-                    echo "$OPTARG does not exist."
-                    return 1
-                else
-                    if ! which "xargs" > /dev/null; then
-                        echo "xargs is required for file."
-                        satisfied=false
-                    fi
-                    filepath=$OPTARG
-                fi
-                ;;
             M)
                 model=$OPTARG
                 ;;
@@ -165,15 +146,18 @@ function ask() {
 
     input=$*
 
+    if ! $raw && [ "$input" = "" ]; then
+        echo -n "\033[32muser: \033[0m"
+        read -r input
+    fi
 
     while true; do
         history=$history' {"role":"user", "content":"'"$input"'"}'
         if $debug; then
             echo -E "$history"
         fi
-        local data='{"messages":['$history'], "model":"'$model'", "stream":'$stream', "max_tokens":'$tokens'}'
-        local message=""
-        local generated_text=""
+        local data='{"messages":['$history'], "model":"'$model'", "stream":false, "max_tokens":'$tokens'}'
+        
         local response=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $api_key" -d $data $api_url)
         if $debug || $raw; then
             echo -E "$response"
@@ -192,6 +176,7 @@ function ask() {
         if ! $raw; then
             echo -E $generated_text
         fi
+        
         history=$history', '$message', '
         ZSH_ASK_HISTORY=$history
         if ! $conversation; then
