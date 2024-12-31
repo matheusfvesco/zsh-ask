@@ -71,7 +71,6 @@ function ask() {
     local api_url=$ZSH_ASK_API_URL
     local api_key=$ZSH_ASK_API_KEY
     local conversation=$ZSH_ASK_CONVERSATION
-    local stream=$ZSH_ASK_STREAM
     local tokens=$ZSH_ASK_TOKENS
     local inherits=$ZSH_ASK_INHERITS
     local model=$ZSH_ASK_MODEL
