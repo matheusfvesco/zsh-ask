@@ -13,7 +13,7 @@ typeset -g ZSH_ASK_API_KEY="ollama"
 
 # Default configurations
 (( ! ${+ZSH_ASK_MODEL} )) &&
-typeset -g ZSH_ASK_MODEL="llama3.2:3b"
+typeset -g ZSH_ASK_MODEL="gemma4:e2b"
 (( ! ${+ZSH_ASK_CONVERSATION} )) &&
 typeset -g ZSH_ASK_CONVERSATION=false
 (( ! ${+ZSH_ASK_INHERITS} )) &&
