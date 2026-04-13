@@ -65,7 +65,29 @@ function _zsh_ask_show_version() {
   cat "$ZSH_ASK_PREFIX/VERSION"
 }
 
+function _zsh_ask_thinking_spinner() {
+    local -a frames=("Thinking   " "Thinking.  " "Thinking.. " "Thinking...")
+    local frame_index=1
+
+    while true; do
+        printf '\r\033[90m%s\033[0m' "${frames[frame_index]}"
+        (( frame_index = frame_index % ${#frames} + 1 ))
+        sleep 0.2
+    done
+}
+
+function _zsh_ask_stop_thinking_spinner() {
+    local spinner_pid=$1
+
+    if [[ -n "$spinner_pid" ]]; then
+        kill "$spinner_pid" 2>/dev/null
+        wait "$spinner_pid" 2>/dev/null
+    fi
+}
+
 function ask() {
+    setopt localoptions nomonitor
+
     local api_url=$ZSH_ASK_API_URL
     local api_key=$ZSH_ASK_API_KEY
     local conversation=$ZSH_ASK_CONVERSATION
@@ -175,9 +197,17 @@ function ask() {
         if $stream; then
             echo -n "\033[0;36m$assistant: \033[0m"
             local full_content=""
+            local response_started=false
             local in_reasoning=true
             local displayed_reasoning=false
-            local thinking_shown=false
+            local thinking_spinner_pid=""
+
+            if ! $show_reasoning; then
+                _zsh_ask_thinking_spinner &
+                thinking_spinner_pid=$!
+                displayed_reasoning=true
+            fi
+
             stdbuf -oL curl -sN -X POST -H "Content-Type: application/json" \
                  -H "Authorization: Bearer $api_key" \
                  -d $data $api_url \
@@ -189,8 +219,15 @@ function ask() {
                 local content=$(echo -E "$json" | jq -r '.choices[0].delta.content // empty')
 
                 if [[ -n "$content" ]]; then
-                    if $in_reasoning && $displayed_reasoning; then
-                        echo -n $'\033[0m\n\n'
+                    if ! $response_started; then
+                        if [[ -n "$thinking_spinner_pid" ]]; then
+                            _zsh_ask_stop_thinking_spinner "$thinking_spinner_pid"
+                            thinking_spinner_pid=""
+                            echo -n $'\r\033[90mThinking...\033[0m\n'
+                        elif $in_reasoning && $displayed_reasoning; then
+                            echo -n $'\033[0m\n\n'
+                        fi
+                        response_started=true
                     fi
                     in_reasoning=false
                     echo -n "$content"
@@ -202,16 +239,14 @@ function ask() {
                             displayed_reasoning=true
                         fi
                         echo -n "$reasoning"
-                    else
-                        if ! $thinking_shown; then
-                            echo -n "\033[90mThinking...\033[0m"$'\n\n'
-                            thinking_shown=true
-                            displayed_reasoning=true
-                            in_reasoning=false
-                        fi
                     fi
                 fi
             done
+            if [[ -n "$thinking_spinner_pid" ]]; then
+                _zsh_ask_stop_thinking_spinner "$thinking_spinner_pid"
+                thinking_spinner_pid=""
+                echo -n $'\r\033[90mThinking...\033[0m\n'
+            fi
             if $in_reasoning && $displayed_reasoning; then
                 echo -n "\033[0m"
             fi
