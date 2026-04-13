@@ -22,6 +22,8 @@ typeset -g ZSH_ASK_INHERITS=false
 typeset -g ZSH_ASK_TOKENS=800
 (( ! ${+ZSH_ASK_STREAM} )) &&
 typeset -g ZSH_ASK_STREAM=false
+(( ! ${+ZSH_ASK_SHOW_REASONING} )) &&
+typeset -g ZSH_ASK_SHOW_REASONING=false
 (( ! ${+ZSH_ASK_HISTORY} )) &&
 typeset -g ZSH_ASK_HISTORY=""
 (( ! ${+ZSH_ASK_INITIALROLE} )) &&
@@ -45,6 +47,7 @@ function _zsh_ask_show_help() {
   echo "  -r                Print raw output."
   echo "  -d                Print debug information."
   echo "  -s                Enable streaming response."
+  echo "  -R                Show reasoning during streaming."
 }
 
 function _zsh_ask_upgrade() {
@@ -75,11 +78,12 @@ function ask() {
     local debug=false
     local raw=false
     local stream=$ZSH_ASK_STREAM
+    local show_reasoning=$ZSH_ASK_SHOW_REASONING
     local satisfied=true
     local input=""
     local assistant="assistant"
     
-    while getopts ":hvcdirsM:t:" opt; do
+    while getopts ":hvcdirsRM:t:" opt; do
         case $opt in
             h)
                 _zsh_ask_show_help
@@ -126,6 +130,9 @@ function ask() {
             s)
                 stream=true
                 ;;
+            R)
+                show_reasoning=true
+                ;;
             :)
                 echo "-$OPTARG needs a parameter"
                 return 1
@@ -169,7 +176,8 @@ function ask() {
             echo -n "\033[0;36m$assistant: \033[0m"
             local full_content=""
             local in_reasoning=true
-            local reasoning_began=false
+            local displayed_reasoning=false
+            local thinking_shown=false
             stdbuf -oL curl -sN -X POST -H "Content-Type: application/json" \
                  -H "Authorization: Bearer $api_key" \
                  -d $data $api_url \
@@ -181,21 +189,30 @@ function ask() {
                 local content=$(echo -E "$json" | jq -r '.choices[0].delta.content // empty')
 
                 if [[ -n "$content" ]]; then
-                    if $in_reasoning && $reasoning_began; then
+                    if $in_reasoning && $displayed_reasoning; then
                         echo -n $'\033[0m\n\n'
                     fi
                     in_reasoning=false
                     echo -n "$content"
                     full_content="$full_content$content"
                 elif [[ -n "$reasoning" && $in_reasoning == true ]]; then
-                    if ! $reasoning_began; then
-                        echo -n "\033[90m"
-                        reasoning_began=true
+                    if $show_reasoning; then
+                        if ! $displayed_reasoning; then
+                            echo -n "\033[90m"
+                            displayed_reasoning=true
+                        fi
+                        echo -n "$reasoning"
+                    else
+                        if ! $thinking_shown; then
+                            echo -n "\033[90mThinking...\033[0m"$'\n\n'
+                            thinking_shown=true
+                            displayed_reasoning=true
+                            in_reasoning=false
+                        fi
                     fi
-                    echo -n "$reasoning"
                 fi
             done
-            if $in_reasoning && $reasoning_began; then
+            if $in_reasoning && $displayed_reasoning; then
                 echo -n "\033[0m"
             fi
             echo
