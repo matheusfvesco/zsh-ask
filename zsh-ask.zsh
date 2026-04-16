@@ -21,7 +21,7 @@ typeset -g ZSH_ASK_INHERITS=false
 (( ! ${+ZSH_ASK_TOKENS} )) &&
 typeset -g ZSH_ASK_TOKENS=800
 (( ! ${+ZSH_ASK_STREAM} )) &&
-typeset -g ZSH_ASK_STREAM=false
+typeset -g ZSH_ASK_STREAM=true
 (( ! ${+ZSH_ASK_SHOW_REASONING} )) &&
 typeset -g ZSH_ASK_SHOW_REASONING=false
 (( ! ${+ZSH_ASK_HISTORY} )) &&
@@ -46,7 +46,7 @@ function _zsh_ask_show_help() {
   echo "  -u                Upgrade this plugin."
   echo "  -r                Print raw output."
   echo "  -d                Print debug information."
-  echo "  -s                Enable streaming response."
+  echo "  -b                Disable streaming response (buffered)."
   echo "  -R                Show reasoning during streaming."
 }
 
@@ -105,7 +105,7 @@ function ask() {
     local input=""
     local assistant="assistant"
     
-    while getopts ":hvcdirsRM:t:" opt; do
+    while getopts ":hvcdibrRM:t:" opt; do
         case $opt in
             h)
                 _zsh_ask_show_help
@@ -149,8 +149,8 @@ function ask() {
             r)
                 raw=true
                 ;;
-            s)
-                stream=true
+            b)
+                stream=false
                 ;;
             R)
                 show_reasoning=true
