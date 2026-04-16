@@ -20,6 +20,10 @@ typeset -g ZSH_ASK_CONVERSATION=false
 typeset -g ZSH_ASK_INHERITS=false
 (( ! ${+ZSH_ASK_TOKENS} )) &&
 typeset -g ZSH_ASK_TOKENS=800
+(( ! ${+ZSH_ASK_STREAM} )) &&
+typeset -g ZSH_ASK_STREAM=true
+(( ! ${+ZSH_ASK_SHOW_REASONING} )) &&
+typeset -g ZSH_ASK_SHOW_REASONING=false
 (( ! ${+ZSH_ASK_HISTORY} )) &&
 typeset -g ZSH_ASK_HISTORY=""
 (( ! ${+ZSH_ASK_INITIALROLE} )) &&
@@ -36,12 +40,14 @@ function _zsh_ask_show_help() {
   echo "  -v                Display the version number."
   echo "  -i                Inherits conversation from ZSH_ASK_HISTORY."
   echo "  -c                Enable conversation."
-  echo "  -M <ollama_model> Set the Ollama model to <ollama_model>, default sets to 'llama3.2:3b'."
+  echo "  -M <ollama_model> Set the Ollama model to <ollama_model>, default sets to 'gemma4:e2b'."
   echo "                    Models can be found at http://127.0.0.1:11434/v1/models."
   echo "  -t <max_tokens>   Set max tokens to <max_tokens>, default sets to 800."
   echo "  -u                Upgrade this plugin."
   echo "  -r                Print raw output."
   echo "  -d                Print debug information."
+  echo "  -b                Disable streaming response (buffered)."
+  echo "  -R                Show reasoning during streaming."
 }
 
 function _zsh_ask_upgrade() {
@@ -59,7 +65,29 @@ function _zsh_ask_show_version() {
   cat "$ZSH_ASK_PREFIX/VERSION"
 }
 
+function _zsh_ask_thinking_spinner() {
+    local -a frames=("Thinking   " "Thinking.  " "Thinking.. " "Thinking...")
+    local frame_index=1
+
+    while true; do
+        printf '\r\033[90m%s\033[0m' "${frames[frame_index]}"
+        (( frame_index = frame_index % ${#frames} + 1 ))
+        sleep 0.2
+    done
+}
+
+function _zsh_ask_stop_thinking_spinner() {
+    local spinner_pid=$1
+
+    if [[ -n "$spinner_pid" ]]; then
+        kill "$spinner_pid" 2>/dev/null
+        wait "$spinner_pid" 2>/dev/null
+    fi
+}
+
 function ask() {
+    setopt localoptions nomonitor
+
     local api_url=$ZSH_ASK_API_URL
     local api_key=$ZSH_ASK_API_KEY
     local conversation=$ZSH_ASK_CONVERSATION
@@ -71,11 +99,13 @@ function ask() {
     local requirements=("curl" "jq")
     local debug=false
     local raw=false
+    local stream=$ZSH_ASK_STREAM
+    local show_reasoning=$ZSH_ASK_SHOW_REASONING
     local satisfied=true
     local input=""
     local assistant="assistant"
     
-    while getopts ":hvcdirM:t:" opt; do
+    while getopts ":hvcdibrRM:t:" opt; do
         case $opt in
             h)
                 _zsh_ask_show_help
@@ -119,6 +149,12 @@ function ask() {
             r)
                 raw=true
                 ;;
+            b)
+                stream=false
+                ;;
+            R)
+                show_reasoning=true
+                ;;
             :)
                 echo "-$OPTARG needs a parameter"
                 return 1
@@ -156,25 +192,88 @@ function ask() {
         if $debug; then
             echo -E "$history"
         fi
-        local data='{"messages":['$history'], "model":"'$model'", "stream":false, "max_tokens":'$tokens'}'
-        
-        local response=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $api_key" -d $data $api_url)
-        if $debug || $raw; then
-            echo -E "$response"
-        fi
-        if ! $raw; then
+        local data='{"messages":['$history'], "model":"'$model'", "stream":'$stream', "max_tokens":'$tokens'}'
+
+        if $stream; then
             echo -n "\033[0;36m$assistant: \033[0m"
-            if echo -E $response | jq -e '.error' > /dev/null; then
-                echo "zsh-ask \033[0;31merror:\033[0m"
-                echo -E $response | jq -r '.error'
+            local full_content=""
+            local response_started=false
+            local in_reasoning=true
+            local displayed_reasoning=false
+            local thinking_spinner_pid=""
+
+            if ! $show_reasoning; then
+                _zsh_ask_thinking_spinner &
+                thinking_spinner_pid=$!
+                displayed_reasoning=true
+            fi
+
+            stdbuf -oL curl -sN -X POST -H "Content-Type: application/json" \
+                 -H "Authorization: Bearer $api_key" \
+                 -d $data $api_url \
+            | while IFS= read -r line || [[ -n "$line" ]]; do
+                [[ -z "$line" ]] && continue
+                [[ "$line" == "data: [DONE]" ]] && break
+                local json="${line#data: }"
+                local reasoning=$(echo -E "$json" | jq -r '.choices[0].delta.reasoning // empty')
+                local content=$(echo -E "$json" | jq -r '.choices[0].delta.content // empty')
+
+                if [[ -n "$content" ]]; then
+                    if ! $response_started; then
+                        if [[ -n "$thinking_spinner_pid" ]]; then
+                            _zsh_ask_stop_thinking_spinner "$thinking_spinner_pid"
+                            thinking_spinner_pid=""
+                            echo -n $'\r\033[90mThinking...\033[0m\n'
+                        elif $in_reasoning && $displayed_reasoning; then
+                            echo -n $'\033[0m\n\n'
+                        fi
+                        response_started=true
+                    fi
+                    in_reasoning=false
+                    echo -n "$content"
+                    full_content="$full_content$content"
+                elif [[ -n "$reasoning" && $in_reasoning == true ]]; then
+                    if $show_reasoning; then
+                        if ! $displayed_reasoning; then
+                            echo -n "\033[90m"
+                            displayed_reasoning=true
+                        fi
+                        echo -n "$reasoning"
+                    fi
+                fi
+            done
+            if [[ -n "$thinking_spinner_pid" ]]; then
+                _zsh_ask_stop_thinking_spinner "$thinking_spinner_pid"
+                thinking_spinner_pid=""
+                echo -n $'\r\033[90mThinking...\033[0m\n'
+            fi
+            if $in_reasoning && $displayed_reasoning; then
+                echo -n "\033[0m"
+            fi
+            echo
+            if [[ ${pipestatus[0]} -ne 0 ]]; then
                 return 1
             fi
-        fi
-        assistant=$(echo -E $response | jq -r '.choices[].role')
-        message=$(echo -E $response | jq -r '.choices[].message')
-        generated_text=$(echo -E $message | jq -r '.content')
-        if ! $raw; then
-            echo -E $generated_text
+            message='{"role":"assistant", "content":"'"$full_content"'"}'
+        else
+            local response=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $api_key" -d $data $api_url)
+            if $debug || $raw; then
+                echo -E "$response"
+            fi
+            if ! $raw; then
+                echo -n "\033[0;36m$assistant: \033[0m"
+                if echo -E $response | jq -e '.error' > /dev/null; then
+                    echo "zsh-ask \033[0;31merror:\033[0m"
+                    echo -E $response | jq -r '.error'
+                    return 1
+                fi
+            fi
+            assistant=$(echo -E $response | jq -r '.choices[].role')
+            message=$(echo -E $response | jq -r '.choices[].message')
+            generated_text=$(echo -E $message | jq -r '.content')
+            if ! $raw; then
+                echo -E "$generated_text"
+            fi
         fi
         
         history=$history', '$message', '
